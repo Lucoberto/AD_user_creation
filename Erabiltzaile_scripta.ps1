@@ -1,30 +1,25 @@
-# Display the menu options
+# Muestra el menu de opciones
 function display_options {
-    Write-Host "
+    Write-Host " 
     ++++++ Menu ++++++
     [1] Automatic CSV
     [2] Manual User
     "
 
-    # Reference to read menu
     read_menu_options
 }
 
-# Read option form menu
+# Lee la opcion del menu
 function read_menu_options {
-    $chose_option                   = Read-Host "Chose option ~> "
-    
-    # Case options
+    $chose_option = Read-Host "Choose option ~>"
+
     switch ($chose_option) {
-
-        1 {
-            create_user -csv_data (auto_csv)
+        1 { 
+            create_user -csv_data (auto_csv) 
         }
-
-        2 {
-            manual_user
+        2 { 
+            manual_user 
         }
-
         default {
             Write-Host "Incorrect choice!"
             display_options
@@ -32,111 +27,105 @@ function read_menu_options {
     }
 }
 
+# Lee el archivo CSV y lo devuelve como un array
 function auto_csv {
-    # Reads the contents of the csv and adds them to an array
-    $csv_data                       = Import-Csv -Path .\test.csv -Delimiter ',' -Header @("name", "subname", "ou") | Select-Object -Skip 1
+    $csv_data                       = Import-Csv -Path test.csv -Delimiter ',' -Header @("name", "subname", "ou", "group") | Select-Object -Skip 1
 
     return $csv_data
 }
 
-# Create a random passowrd with numbers
-function auto_password_generator {
-    $random_pasword                 = Get-Random
 
-    return $random_pasword
-}
-
-# Generates names with first and last name
+# Genera un nombre de usuario basado en el nombre y apellido
 function username_generator {
-    # Length of the name and subname
-    $number_of_letters_name         = $proces_csv_data.id.Length
-    $number_of_letters_subname      = $proces_csv_data.subname.Length
+    param($proces_csv_data)
 
-    # User name
-    $user_name                      = $proces_csv_data.id.Substring(0, $number_of_letters_name) + $proces_csv_data.name.Substring(0, $number_of_letters_subname)
+    $name_part                      = $proces_csv_data.name.Substring(0, [Math]::Min(4, $proces_csv_data.name.Length))
+    $subname_part                   = $proces_csv_data.subname.Substring(0, [Math]::Min(4, $proces_csv_data.subname.Length))
 
-    return $user_name
+    return $name_part + $subname_part
 }
 
+# Obtiene el dominio en formato DC=domain,DC=com
 function domain_ad {
-    # Get domain AD in format "DC=domain_name,DC=com"
-    $domainDN                       = (Get-ADDomain).DistinguishedName
-
-    return $domainDN
+    return (Get-ADDomain).DistinguishedName
 }
 
-# User crate function
+# Crea un usuario en Active Directory
 function create_user {
-    param( $csv_data )
+    param([array]$csv_data)
 
-    # Take arrays one by one
     foreach ($proces_csv_data in $csv_data) {
-
-        # Function calls
-        $random_pasword             = auto_password_generator
-        $user_name                  = username_generator
+        $user_name                  = username_generator -proces_csv_data $proces_csv_data
         $domain_name                = domain_ad
 
-        # Domain + Organizational Unit variable
-        $complete_domain            = "OU=$proces_csv_data.ou" + $domain_name
+        # Construye el Distinguished Name (DN) de la OU
+        $complete_domain            = "OU=$($proces_csv_data.ou),$domain_name"
 
-        # Create user in AD
+        # Crea el usuario en AD
         New-ADUser -Name $user_name `
             -GivenName              $proces_csv_data.name `
             -Surname                $proces_csv_data.subname `
-            -UserPrincipalName      "$user_name@$domain_name" `
+            -UserPrincipalName      $user_name@$(($domain_name -split ',')[0] -replace 'DC=','') `
             -Path                   $complete_domain `
-            -AccountPassword        (ConvertTo-SecureString $random_pasword -AsPlainText -Force) `
+            -AccountPassword        (ConvertTo-SecureString $user_name -AsPlainText -Force) `
             -Enabled                $true `
             -ChangePasswordAtLogon  $true
     }
 }
 
-# Shows how the syntax for creating users looks like
+# Muestra el formato para ingreso manual
 function display_form {
-    Write-Host "
-            ++++++ Menu ++++++
-    You need to write separete with  ','
-    The order is user_name,name,subname,ou
+    Write-Host " 
+    ++++++ Manual Input Format ++++++
+    Enter details separated by ','
+    Format user_name,name,subname,ou
     "
 }
 
-# Saves users data
+# Captura la entrada manual y valida el formato
 function menu_manual_option {
     display_form
 
-    $chose_option                   = Read-Host "Write ~> "
+    $chose_option                   = Read-Host "Enter details ~ "
 
-    if (($chose_option -split ",").count -1 -eq 3) {
-        return $chose_option
+    $values                         = $chose_option -split ','
 
+    if ( $values.Count -eq 4 ) {
+        return $values
     } else {
-        Write-Host "Wrong syntax"
-
-        menu_manual_option
+        Write-Host "Incorrect format! Try again."
+        return menu_manual_option
     }
 }
 
-# Create users manualy
+# Crea un usuario manualmente
 function manual_user {
-    # Function calls
-    $random_pasword                 = auto_password_generator
-    $domain_name                    = domain_ad
-    $user_manual_config             = menu_manual_option
+    $domain_name                        = domain_ad
+    $user_manual_config                 = menu_manual_option
 
-    # Domain + Organizational Unit variable
-    $complete_domain                = "OU=$proces_csv_data.ou" + $domain_name
+    $user_name                          = $user_manual_config[0]
+    $given_name                         = $user_manual_config[1]
+    $surname                            = $user_manual_config[2]
+    $ou                                 = $user_manual_config[3]
 
-    # Create user in AD
-    New-ADUser -Name $user_manual_config[1] `
-        -GivenName                  $user_manual_config[2] `
-        -Surname                    $user_manual_config[3] `
-        -UserPrincipalName          "$user_manual_config[1]@$domain_name" `
-        -Path                       $complete_domain `
-        -AccountPassword            (ConvertTo-SecureString $random_pasword -AsPlainText -Force) `
-        -Enabled                    $true `
-        -ChangePasswordAtLogon      $true
+    # Construye el Distinguished Name (DN) de la OU
+    $complete_domain                    = "OU=$ou,$domain_name"
+
+    # Crea el usuario en AD
+    New-ADUser -Name $user_name `
+        -GivenName                      $given_name `
+        -Surname                        $surname `
+        -UserPrincipalName              $user_name@$(($domain_name -split ',')[0] -replace 'DC=','') `
+        -Path                           $complete_domain `
+        -AccountPassword                (ConvertTo-SecureString $user_name -AsPlainText -Force) `
+        -Enabled                        $true `
+        -ChangePasswordAtLogon          $true
 }
 
+function add_group() {
+    param([array]$csv_data)
+    Add-ADGroupMember -Identity $csv_data.grup -Members $csv_data.user_name
+}
 
+# Inicia el script
 display_options
